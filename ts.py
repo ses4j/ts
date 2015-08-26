@@ -1,18 +1,37 @@
-import logging, re
+import logging, re, os, shutil
 from datetime import datetime
 
 from modgrammar import *
 from dateutil.parser import parse as dateutil_parse
 
+def samefile(f1, f2):
+    '''
+    A simple replacement of the os.path.samefile() function not existing 
+    on the Windows platform. 
+    MAC/Unix supported in standard way :).
+
+    Author: Denis Barmenkov <denis.barmenkov@gmail.com>
+
+    Source: code.activestate.com/recipes/576886/
+
+    Copyright: this code is free, but if you want to use it, please
+               keep this multiline comment along with function source. 
+               Thank you.
+
+    2009-08-19 20:13 
+    '''
+    try:
+        return os.path.samefile(f1, f2)
+    except AttributeError:
+        f1 = os.path.abspath(f1).lower()
+        f2 = os.path.abspath(f2).lower()
+        return f1 == f2
+
+
 
 logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-# ch = logging.StreamHandler()
-# logger.addHandler(ch)
-# grammar_whitespace_mode = 'optional'
-# modgrammar.grammar_whitespace = True
-# modgrammar.grammar_whitespace = False
 
 grammar_whitespace = False
 
@@ -143,14 +162,7 @@ def parse(line, prefix='* '):
     if not line.strip():
         return None
 
-    # if not line.startswith(prefix):
-    #     return None
-
-    # if line.startswith('* __'):
-    #     return None
-
     origresult = myparser.parse_string(line.rstrip(), reset=True, eof=True) #, matchtype='longest')
-    # print result.elements
     ret = {}
     result = origresult.elements[0]
 
@@ -210,16 +222,7 @@ def parse(line, prefix='* '):
                 ret['ranges'].append( {'s': parsed_start, 'e': parsed_end, 'duration': duration} )
             else:
                 pass
-                # import pdb; pdb.set_trace()
-                # raise Exception('unknown: ' + r.grammar_name)
 
-            # times = [parse_time(cur_date, str(t)) for t in r.find_all(MyTime)]
-            # if len(times) == 1:
-            #     ret['ranges'].append((times[0], None))
-            # elif len(times) == 2:
-            #     ret['ranges'].append(tuple(times))
-            # else:
-            #     raise ValueError('..')
     
     if 'ranges' in ret:
         total_duration = sum([r['duration'] for r in ret['ranges'] if r['duration'] is not None])
@@ -271,53 +274,57 @@ def format_range(r,):
 def format_ret(ret):
     if 'ranges' not in ret:
         total_duration = ret['hours']
-        output = '%10s %s' % (ret['date'].date(), format_hours(total_duration))
+        output = '%10s %5s' % (ret['date'].date(), format_hours(total_duration))
     else:
         parsed_ranges = ret['ranges']
         rearranges = [format_range(r) for r in parsed_ranges]
-        # print('    %s-%s(%s)' % (start_string, end_string, duration))
-        output = '%10s %5s %s' % (ret['date'].date(), format_hours(ret['hours']), ",".join(rearranges))
+        output = '%10s %5s %s' % (ret['date'].date(), format_hours(ret['hours']), ", ".join(rearranges))
 
     return '%s%s%s' % (ret['prefix'], output, str(ret['suffix']).rstrip())
 
-
-# if __name__=='__main__':
-
-#     result = myparser.parse_string("5/20/2015", reset=True, eof=True)
-#     print result.string, result.elements
-
-#     result = myparser.parse_string("5/20/2015 5h", reset=True, eof=True)
-#     print result.string, result.elements
-
-#     result = myparser.parse_string("5/20/2015 5  10:10-10:25a,12-2p", reset=True, eof=True)
-#     print result.string, result.elements
-
-#     result = myparser.parse_string("5/20/2015 5  10:10 - 10:25a, 12-", reset=True, eof=True)
-#     print result.string, result.elements
-
-#     print "date=" + str(result.find(MyDate))
 
 if __name__=='__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Process a timesheet')
     parser.add_argument('-f', '--file', required=True)
+    parser.add_argument('-o', '--out', default=None)
 
     args = parser.parse_args()
     f = open(args.file)
+
+    if args.out is not None:
+        if samefile(args.file, args.out):
+            f.close()
+            backup_filename = args.file + '.backup'
+            shutil.copyfile(args.file, backup_filename)
+            f = open(backup_filename)
+
+        outf = open(args.out, 'w')
+    else:
+        outf = None
 
     for line in f:
         print line.rstrip()
         try:
             ret = parse(line)
             if ret is None:
+                if outf:
+                    outf.write(line.rstrip() + '\n')
                 continue
+
             fixed_line = format_ret(ret)
             print "+", fixed_line
+            if outf:
+                outf.write(fixed_line.rstrip() + '\n')
+
 
         except TimesheetParseError:
             raise
         except ParseError:
+            if outf:
+                outf.write(line.rstrip() + '\n')
+
             # print 'skipped...'
             pass
             # logger.exception("failed to parse")
