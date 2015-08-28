@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 grammar_whitespace = False
 
 class MyDate(Grammar):
-    grammar = (WORD('0-9', "0-9/", grammar_name='date'))
+    # grammar = (WORD('0-9', "-0-9/", grammar_name='date'))
+    grammar = (WORD('2', "-0-9", fullmatch=True, grammar_name='date') 
+        | WORD('0-9', "-0-9/", grammar_name='date'))
     grammar_tags = ['date']
 
 class Hours (Grammar):
@@ -83,6 +85,12 @@ time_regex = re.compile(r'(\d{1,2})(:\d+)?([aApP])?')
 def parse_time(cur_date, time_str, after=None):
     """ Parse time 
 
+    >>> parse_time(datetime(2015, 6, 3, 0, 0), '12p')
+    datetime.datetime(2015, 6, 3, 12, 0)
+    >>> parse_time(datetime(2015, 6, 3, 0, 0), '12:01p')
+    datetime.datetime(2015, 6, 3, 12, 1)
+    >>> parse_time(datetime(2015, 6, 3, 0, 0), '12a')
+    datetime.datetime(2015, 6, 3, 0, 0)
     >>> parse_time(datetime(2015, 6, 3, 0, 0), '1')
     datetime.datetime(2015, 6, 3, 13, 0)
     >>> parse_time(datetime(2015, 6, 3, 0, 0), '1a')
@@ -114,16 +122,17 @@ def parse_time(cur_date, time_str, after=None):
             hour -= 12
     else:
         # AM/PM not specified.
-        ret = cur_date.replace(hour=hour, minute=minute)
+        time_as_am_guess = datetime(cur_date.year, cur_date.month, cur_date.day, hour=hour, minute=minute)
         if after is not None:
-            if after > ret:
+            if after > time_as_am_guess:
                 hour += 12
         else:
             if hour < 7:
                 logger.warn("Assuming time {} is PM".format(time_str))
                 hour += 12
 
-    return cur_date.replace(hour=hour, minute=minute)
+    
+    return datetime(cur_date.year, cur_date.month, cur_date.day, hour=hour, minute=minute)
 
 class TimesheetParseError(Exception):
     pass
@@ -133,14 +142,14 @@ def parse(line, prefix='* '):
     >>> myparser.parse_string("5/20/2015", reset=True, eof=True)
     MyGrammar<'5/20/2015'>
     >>> parse("5/20/2015", prefix='')
-    {'date': datetime.datetime(2015, 5, 20, 0, 0), 'prefix': Prefix<''>, 'suffix': Suffix<None, None, ''>}
+    {'date': datetime.date(2015, 5, 20), 'prefix': Prefix<''>, 'suffix': Suffix<None, None, ''>}
     >>> d = parse("6/21/2015 1.25  3:33-4:44a", prefix='')
     Traceback (most recent call last):
         ...
     TimesheetParseError: huh?
     >>> d = parse("5/20/2015 5  10:10 - 10:25a, 12-", prefix='')
     >>> d['date']
-    datetime.datetime(2015, 5, 20, 0, 0)
+    datetime.date(2015, 5, 20)
     >>> d['hours']
     0.25
     >>> len(d['ranges'])
@@ -148,21 +157,22 @@ def parse(line, prefix='* '):
     >>> d['ranges'][0]['s']
     datetime.datetime(2015, 5, 20, 10, 10)
     >>> format_ret(d)
-    '2015-05-20   .25 10:10a-10:25a(.25),12a-'
+    '2015-05-20   .25 10:10a-10:25a(.25), 12p-'
     >>> d = parse('6/15/2015 4.25  10a-11:30(1.5), 3-5:45p(2.75)', prefix='')
     >>> d['ranges'][1]['duration']
     2.75
-    >>> d = parse('* 6/3/2015  1.5  10a-11:15a, 12:45p-1p, 6-6:15 # whatever yo', prefix='* ')
+    >>> d = parse('* 2015-06-03  1.5  10a-11:15a, 12:45p-1p, 6-6:15 # whatever yo', prefix='* ')
     >>> d = parse('* 7/22/2015 6.25  10:00a-11:30a(1.5), 12:30p-3:30p(3), 9:15p-11p(1.75)', prefix='* ')
     >>> d = parse('* 7/13/2015 3.5  .25, 1:30p-5p', prefix='* ')
     >>> format_ret(d)
-    '* 2015-07-13  3.75 .25,1:30p-5p(3.50)'
+    '* 2015-07-13  3.75 .25, 1:30p-5p(3.50)'
     """
     
     if not line.strip():
         return None
 
-    origresult = myparser.parse_string(line.rstrip(), reset=True, eof=True) #, matchtype='longest')
+    line = line.rstrip()
+    origresult = myparser.parse_string(line, reset=True, eof=True) #, matchtype='longest')
     ret = {}
     result = origresult.elements[0]
 
@@ -173,7 +183,7 @@ def parse(line, prefix='* '):
     ret['prefix'] = result.get(Prefix)
     ret['suffix'] = result.get(Suffix)
 
-    cur_date = dateutil_parse(str(date_g))
+    cur_date = dateutil_parse(str(date_g)).date()
     ret['date'] = cur_date
     
     hours_g = result.get(Hours)
@@ -215,7 +225,8 @@ def parse(line, prefix='* '):
 
                 if parsed_end is not None:
                     if parsed_end < parsed_start:
-                        raise TimesheetParseError("huh?")
+                        # import pdb; pdb.set_trace()
+                        raise TimesheetParseError("{} < {} in {}".format(parsed_end, parsed_start, line))
                     duration = (parsed_end-parsed_start).seconds/60./60.
                 else:
                     duration = None
@@ -226,13 +237,15 @@ def parse(line, prefix='* '):
     
     if 'ranges' in ret:
         total_duration = sum([r['duration'] for r in ret['ranges'] if r['duration'] is not None])
-        if 'hours' in ret and total_duration != ret['hours']:
-            logger.warn('changing total hours from %s to %s' % (ret['hours'], total_duration))
+        if 'hours' in ret and format_hours(total_duration) != format_hours(ret['hours']):
+            logger.warn('Changing total hours from %s to %s\n  Original: %s' % (ret['hours'], total_duration, line))
         ret['hours'] = total_duration
 
         if len(ret['ranges']) == 1 and 's' not in ret['ranges'][0]:
             del ret['ranges']
 
+    if 'hours' in ret and ret['hours'] > 9:
+        logger.warn('Calculated duration={}, which is above normal\n  Original: {}'.format(ret['hours'], line))
 
     # logger.debug('line={}\n-> ret={}'.format(line, ret))
 
@@ -246,23 +259,37 @@ def format_hours(h):
 
     return ("%.2f" % h).lstrip('0')
 
+def format_time(t):
+    """ Print out succinct time. 
+    >>> format_time(datetime(2015, 1, 1, 5, 15, 0))
+    '5:15a'
+    >>> format_time(datetime(2015, 1, 1, 12, 0, 0))
+    '12p'
+    >>> format_time(datetime(2015, 1, 1, 0, 1, 0))
+    '12:01a'
+    """
+    if t is None:
+        return ""
+
+    ampm = "a"
+    if t.hour > 12:
+        ampm = "p"
+        hour = t.hour - 12
+    elif t.hour == 12:
+        ampm = "p"
+        hour = 12
+    elif t.hour == 0:
+        hour = 12
+    else:
+        hour = t.hour
+
+    if t.minute==0:
+        s = "%d%s" % (hour, ampm)
+    else:
+        s = "%d:%02d%s" % (hour, t.minute, ampm)
+    return s
+
 def format_range(r,):
-    def format_time(t):
-        if t is None:
-            return ""
-
-        ampm = "a"
-        if t.hour > 12 or (t.hour == 12 and t.minute > 0):
-            ampm = "p"
-            hour = t.hour - 12
-        else:
-            hour = t.hour
-
-        if t.minute==0:
-            s = "%d%s" % (hour, ampm)
-        else:
-            s = "%d:%2d%s" % (hour, t.minute, ampm)
-        return s
     if 's' not in r:
         return '%s' % format_hours(r['duration'])
     else:
@@ -274,13 +301,16 @@ def format_range(r,):
 def format_ret(ret):
     if 'ranges' not in ret:
         total_duration = ret['hours']
-        output = '%10s %5s' % (ret['date'].date(), format_hours(total_duration))
+        output = '%10s %5s' % (ret['date'], format_hours(total_duration))
     else:
         parsed_ranges = ret['ranges']
         rearranges = [format_range(r) for r in parsed_ranges]
-        output = '%10s %5s %s' % (ret['date'].date(), format_hours(ret['hours']), ", ".join(rearranges))
+        output = '%10s %5s %s' % (ret['date'], format_hours(ret['hours']), ", ".join(rearranges))
 
-    return '%s%s%s' % (ret['prefix'], output, str(ret['suffix']).rstrip())
+    suffix = str(ret['suffix']).strip()
+    if len(suffix) > 0:
+        suffix = " " + suffix
+    return '%s%s%s' % (ret['prefix'], output, suffix)
 
 
 if __name__=='__main__':
@@ -289,6 +319,10 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Process a timesheet')
     parser.add_argument('-f', '--file', required=True)
     parser.add_argument('-o', '--out', default=None)
+    parser.add_argument('-c', '--console', action='store_true', help="Print to console")
+
+    weekly_summary_template = '* __{hours_this_week} ({hours_since_invoice} uninvoiced)__'
+    invoiced_template = '* **INVOICED HERE**'
 
     args = parser.parse_args()
     f = open(args.file)
@@ -304,22 +338,94 @@ if __name__=='__main__':
     else:
         outf = None
 
+    summary_results = {}
+    last_date = None
+    last_iso = None
+
+    invoice_has_started = False
+    weekly_hours = 0.
+    invoice_hours = 0.
+
+    def format_summary_line():
+        global weekly_hours, invoice_hours
+        return weekly_summary_template.format(
+            hours_this_week=format_hours(weekly_hours), 
+            hours_since_invoice=format_hours(invoice_hours))
+
+    def write_summary_line(invoice=False):
+        global weekly_hours, invoice_hours
+        if weekly_hours != 0.:
+            summary_line = format_summary_line()
+            if args.console: 
+                print summary_line
+            if outf:
+                outf.write(summary_line + '\n')
+            weekly_hours = 0.
+
+        if invoice:
+            summary_line = invoiced_template.format(
+                hours_this_week=format_hours(weekly_hours), 
+                hours_since_invoice=format_hours(invoice_hours))
+            if args.console: 
+                print summary_line
+            if outf:
+                outf.write(summary_line + '\n')
+            invoice_hours = 0.
+        
+        if outf:
+            outf.write('\n')
+
+
     for line in f:
-        print line.rstrip()
+        if args.console:
+            print line.rstrip()
+
         try:
+            if invoice_has_started:
+                # Found an invoice marker, so rewrite it...
+                if line.startswith(invoiced_template):
+                    write_summary_line(invoice=True)
+                    continue
+
+                # Throw out empty lines
+                if line.strip() == '':
+                    continue
+
+                # Just throw out old summary lines.. we'll write them again ourselves.
+                if line.startswith(format_summary_line()):
+                    continue
+
             ret = parse(line)
             if ret is None:
                 if outf:
                     outf.write(line.rstrip() + '\n')
                 continue
 
+            invoice_has_started = True
+            if last_date is not None and last_date > ret['date']:
+                logger.warn('Date {} is listed after date {}.'.format(ret['date'], last_date))
+            if ret['date'] in summary_results:
+                logger.warn('Date {} listed multiple times.'.format(ret['date']))
+
+            iso = ret['date'].isocalendar()
+            if last_iso is not None and (iso[0] != last_iso[0] or iso[1] != last_iso[1]):
+                write_summary_line()
+
+            last_date = ret['date']
+            last_iso = iso
+            weekly_hours += ret['hours']
+            invoice_hours += ret['hours']
+
+            summary_results[ret['date']] = ret
+
             fixed_line = format_ret(ret)
-            print "+", fixed_line
+            if args.console:
+                print "+", fixed_line
             if outf:
                 outf.write(fixed_line.rstrip() + '\n')
 
-
         except TimesheetParseError:
+            print "Problem parsing."
             raise
         except ParseError:
             if outf:
@@ -329,3 +435,8 @@ if __name__=='__main__':
             pass
             # logger.exception("failed to parse")
             # raise
+    write_summary_line()
+    if outf:
+        outf.close()
+
+    print "{} hours uninvoiced currently...".format(format_hours(invoice_hours))
