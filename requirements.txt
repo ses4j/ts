@@ -1,3 +1,3 @@
 modgrammar-py2==0.9.1
 python-dateutil==2.4.2
-six==1.9.0
+PyYAML==3.10

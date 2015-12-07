@@ -1,8 +1,17 @@
-import logging, re, os, shutil
+import logging, re, os, shutil, sys
 from datetime import datetime
 
-from modgrammar import *
 from dateutil.parser import parse as dateutil_parse
+from modgrammar import *
+import yaml
+
+def get_default_settings():
+    settings = {
+        'prefix': '* ',
+        'verbose': 0,
+        'weekly_summary_template': '__{hours_this_week} ({hours_since_invoice} uninvoiced)__'
+    }
+    return settings
 
 def samefile(f1, f2):
     '''
@@ -41,7 +50,11 @@ class MyDate(Grammar):
         | WORD('0-9', "-0-9/", grammar_name='date'))
     grammar_tags = ['date']
 
-class Hours (Grammar):
+class BillCode(Grammar):
+    """ All capital letter billing code. """
+    grammar = (WORD("A-Z", grammar_name='bill_code'))
+
+class Hours(Grammar):
     grammar = (WORD(".0-9", grammar_name='hours'), OPTIONAL("h"))
 
 class Hour(Grammar):
@@ -53,11 +66,11 @@ class Minute(Grammar):
 class AMPM(Grammar):
     grammar = L("A") | L("P") | L("a") | L("p")
 
-class MyTime (Grammar):
+class MyTime(Grammar):
     grammar = (G(Hour, OPTIONAL(":", Minute))), OPTIONAL(AMPM)
     # grammar = (WORD("0-9:", grammar_name='time'), OPTIONAL(L("A") | L("P") | L("a") | L("p"), grammar_name='ampm'))
 
-class Range (Grammar):
+class Range(Grammar):
     grammar = G(MyTime, OPTIONAL(SPACE), '-', OPTIONAL(SPACE),
         OPTIONAL(MyTime), OPTIONAL('(', Hours, ')'), grammar_name='range')
 
@@ -71,11 +84,13 @@ class Suffix(Grammar):
     grammar = (OPTIONAL(SPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
 
 class MyGrammar (Grammar):
-
     grammar = (
         G(Prefix, MyDate, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
         G(Prefix, MyDate, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
         G(Prefix, MyDate, SPACE, Hours, Suffix, grammar_name="2arghours") |  
+        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
+        G(Prefix, MyDate, SPACE, BillCode, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
+        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, Suffix, grammar_name="2arghours") |  
         G(Prefix, MyDate, Suffix, grammar_name="justdate")
     )
 
@@ -137,7 +152,7 @@ def parse_time(cur_date, time_str, after=None):
 class TimesheetParseError(Exception):
     pass
 
-def parse(line, prefix='* '):
+def parse(line, settings=None, prefix=None):
     """ Parse grammar.
     >>> myparser.parse_string("5/20/2015", reset=True, eof=True)
     MyGrammar<'5/20/2015'>
@@ -168,6 +183,12 @@ def parse(line, prefix='* '):
     '* 2015-07-13  3.75 .25, 1:30p-5p(3.50)'
     """
     
+    if settings is None:
+        settings = get_default_settings()
+
+    if prefix is None:
+        prefix = settings.get('prefix','* ')
+
     if not line.strip():
         return None
 
@@ -182,6 +203,7 @@ def parse(line, prefix='* '):
 
     ret['prefix'] = result.get(Prefix)
     ret['suffix'] = result.get(Suffix)
+    ret['billcode'] = result.get(BillCode)
 
     cur_date = dateutil_parse(str(date_g)).date()
     ret['date'] = cur_date
@@ -247,7 +269,8 @@ def parse(line, prefix='* '):
     if 'hours' in ret and ret['hours'] > 9:
         logger.warn('Calculated duration={}, which is above normal\n  Original: {}'.format(ret['hours'], line))
 
-    # logger.debug('line={}\n-> ret={}'.format(line, ret))
+    if settings['verbose'] >= 2:
+        print('= parsed={}'.format(ret))
 
     return ret
 
@@ -298,14 +321,18 @@ def format_range(r,):
         else:
             return "%s-" % (format_time(r['s']), )
 
-def format_ret(ret):
+def format_ret(ret, settings):
+    formatted_billcode = ''
+    if settings['billcode']:
+        formatted_billcode = '%5s'% (ret.get('billcode', '') or '', )
+
     if 'ranges' not in ret:
         total_duration = ret['hours']
-        output = '%10s %5s' % (ret['date'], format_hours(total_duration))
+        output = '%10s%s %5s' % (ret['date'], formatted_billcode, format_hours(total_duration))
     else:
         parsed_ranges = ret['ranges']
         rearranges = [format_range(r) for r in parsed_ranges]
-        output = '%10s %5s %s' % (ret['date'], format_hours(ret['hours']), ", ".join(rearranges))
+        output = '%10s%s %5s %s' % (ret['date'], formatted_billcode, format_hours(ret['hours']), ", ".join(rearranges))
 
     suffix = str(ret['suffix']).strip()
     if len(suffix) > 0:
@@ -313,30 +340,58 @@ def format_ret(ret):
     return '%s%s%s' % (ret['prefix'], output, suffix)
 
 
+FRONT_MATTER_TERMINUS_REGEX = re.compile('^---+$')
+def load_front_matter(f):
+    """ Load jekyll-style front-matter config from top of file.
+
+    >>> re.match
+    datetime.datetime(2015, 6, 3, 12, 0)
+
+    """
+    settings = get_default_settings()
+
+    front_matter = []
+    found=False
+    for line in f:
+        if FRONT_MATTER_TERMINUS_REGEX.match(line):
+            found=True
+            break
+        front_matter.append(line)
+
+    if not found:
+        print "Front-matter YAML is required."
+        sys.exit(1)
+
+    fm_settings = yaml.load("".join(front_matter))
+    settings.update(fm_settings)
+
+    return settings
+
+
 if __name__=='__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Process a timesheet')
-    parser.add_argument('-f', '--file', required=True)
-    parser.add_argument('-o', '--out', default=None)
-    parser.add_argument('-c', '--console', action='store_true', help="Print to console")
+    parser.add_argument('-v', '--verbose', action='count', default=None)
+    parser.add_argument('-f', '--file', metavar='FILE', required=True)
+    parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
 
-    weekly_summary_template = '* __{hours_this_week} ({hours_since_invoice} uninvoiced)__'
+    # weekly_summary_template = '* __{hours_this_week} ({hours_since_invoice} uninvoiced)__'
     invoiced_template = '* **INVOICED HERE**'
 
     args = parser.parse_args()
-    f = open(args.file)
 
-    if args.out is not None:
-        if samefile(args.file, args.out):
-            f.close()
-            backup_filename = args.file + '.backup'
-            shutil.copyfile(args.file, backup_filename)
-            f = open(backup_filename)
+    if args.out is None:
+        args.out = args.file
+        
+    input_filename = args.file
+    output_filename = args.out
+    if samefile(args.file, args.out):
+        backup_filename = args.file + '.backup'
+        shutil.copyfile(args.file, backup_filename)
+        input_filename = backup_filename
 
-        outf = open(args.out, 'w')
-    else:
-        outf = None
+    f = open(input_filename)
 
     summary_results = {}
     last_date = None
@@ -347,26 +402,25 @@ if __name__=='__main__':
     invoice_hours = 0.
 
     def format_summary_line():
-        global weekly_hours, invoice_hours
+        # global weekly_hours, invoice_hours,
+        weekly_summary_template = settings['prefix'] + settings['weekly_summary_template']
         return weekly_summary_template.format(
             hours_this_week=format_hours(weekly_hours), 
             hours_since_invoice=format_hours(invoice_hours))
 
-    def write_summary_line(invoice=False):
+    def write_summary_line(invoice=False, original_line=''):
         global weekly_hours, invoice_hours
         if weekly_hours != 0.:
             summary_line = format_summary_line()
-            if args.console: 
+            if settings['verbose'] >= 1: 
                 print summary_line
             if outf:
                 outf.write(summary_line + '\n')
             weekly_hours = 0.
 
         if invoice:
-            summary_line = invoiced_template.format(
-                hours_this_week=format_hours(weekly_hours), 
-                hours_since_invoice=format_hours(invoice_hours))
-            if args.console: 
+            summary_line = original_line
+            if settings['verbose'] >= 1: 
                 print summary_line
             if outf:
                 outf.write(summary_line + '\n')
@@ -376,15 +430,27 @@ if __name__=='__main__':
             outf.write('\n')
 
 
+    settings = load_front_matter(f)
+    if args.verbose is not None:
+        settings['verbose'] = args.verbose
+
+    logger.info("settings {}".format(settings))
+
+    outf = open(output_filename, 'w')
+    yaml.dump(settings, outf, default_flow_style=False)
+    outf.write('----\n')
+
     for line in f:
-        if args.console:
-            print line.rstrip()
+        if settings['verbose'] >= 1:
+            print '< {}'.format(line.rstrip())
 
         try:
             if invoice_has_started:
                 # Found an invoice marker, so rewrite it...
                 if line.startswith(invoiced_template):
-                    write_summary_line(invoice=True)
+                    write_summary_line(invoice=True, original_line=line)
+                    if settings['verbose'] >= 1:
+                        print "> Wrote summary line".format()
                     continue
 
                 # Throw out empty lines
@@ -395,8 +461,10 @@ if __name__=='__main__':
                 if line.startswith(format_summary_line()):
                     continue
 
-            ret = parse(line)
+            ret = parse(line, settings)
             if ret is None:
+                if settings['verbose'] >= 1 and line.strip() != '':
+                    print "> Failed to parse. Writing straight.".format()
                 if outf:
                     outf.write(line.rstrip() + '\n')
                 continue
@@ -418,9 +486,9 @@ if __name__=='__main__':
 
             summary_results[ret['date']] = ret
 
-            fixed_line = format_ret(ret)
-            if args.console:
-                print "+", fixed_line
+            fixed_line = format_ret(ret, settings)
+            if settings['verbose'] >= 1: 
+                print ">", fixed_line
             if outf:
                 outf.write(fixed_line.rstrip() + '\n')
 
