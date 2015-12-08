@@ -7,9 +7,15 @@ import yaml
 
 def get_default_settings():
     settings = {
+        'billcode': False,
         'prefix': '* ',
+        'invoice_on': 'marker',
+        'invoice_marker': '====',
+        'summary_on': 'marker',
+        'summary_marker': '----',
         'verbose': 0,
-        'weekly_summary_template': '__{hours_this_week} ({hours_since_invoice} uninvoiced)__'
+        'weekly_summary_template': '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)',
+        'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)'
     }
     return settings
 
@@ -376,9 +382,6 @@ if __name__=='__main__':
     parser.add_argument('-f', '--file', metavar='FILE', required=True)
     parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
 
-    # weekly_summary_template = '* __{hours_this_week} ({hours_since_invoice} uninvoiced)__'
-    invoiced_template = '* **INVOICED HERE**'
-
     args = parser.parse_args()
 
     if args.out is None:
@@ -410,21 +413,29 @@ if __name__=='__main__':
 
     def write_summary_line(invoice=False, original_line=''):
         global weekly_hours, invoice_hours
-        if weekly_hours != 0.:
-            summary_line = format_summary_line()
+        if invoice:
+            template = settings['invoice_template']
+        else:
+            template = settings['weekly_summary_template']
+
+        summary_line = settings['prefix'] + template.format(
+            hours_this_week=format_hours(weekly_hours), 
+            hours_since_invoice=format_hours(invoice_hours))
+
+        original_line_split = original_line.split('#', 1)
+        if len(original_line_split)==2:
+            comment = original_line_split[-1].strip()
+            summary_line += ' # ' + comment
+
+        if weekly_hours != 0. or invoice:
             if settings['verbose'] >= 1: 
                 print summary_line
             if outf:
                 outf.write(summary_line + '\n')
             weekly_hours = 0.
 
-        if invoice:
-            summary_line = original_line
-            if settings['verbose'] >= 1: 
-                print summary_line
-            if outf:
-                outf.write(summary_line + '\n')
-            invoice_hours = 0.
+            if invoice:
+                invoice_hours = 0.
         
         if outf:
             outf.write('\n')
@@ -447,7 +458,7 @@ if __name__=='__main__':
         try:
             if invoice_has_started:
                 # Found an invoice marker, so rewrite it...
-                if line.startswith(invoiced_template):
+                if settings['invoice_on'] == 'marker' and line.startswith(settings['invoice_marker']):
                     write_summary_line(invoice=True, original_line=line)
                     if settings['verbose'] >= 1:
                         print "> Wrote summary line".format()
@@ -458,8 +469,13 @@ if __name__=='__main__':
                     continue
 
                 # Just throw out old summary lines.. we'll write them again ourselves.
-                if line.startswith(format_summary_line()):
-                    continue
+                if settings['summary_on'] == 'marker':
+                    if line.startswith(settings['summary_marker']):
+                        write_summary_line(original_line=line)
+                        continue
+                else:
+                    if line.startswith(format_summary_line()):
+                        continue
 
             ret = parse(line, settings)
             if ret is None:
@@ -469,6 +485,8 @@ if __name__=='__main__':
                     outf.write(line.rstrip() + '\n')
                 continue
 
+            if not invoice_has_started and settings['verbose'] >= 1:
+                print "! Invoice has started!"
             invoice_has_started = True
             if last_date is not None and last_date > ret['date']:
                 logger.warn('Date {} is listed after date {}.'.format(ret['date'], last_date))
@@ -476,8 +494,9 @@ if __name__=='__main__':
                 logger.warn('Date {} listed multiple times.'.format(ret['date']))
 
             iso = ret['date'].isocalendar()
-            if last_iso is not None and (iso[0] != last_iso[0] or iso[1] != last_iso[1]):
-                write_summary_line()
+            if settings['summary_on'] == 'weekly':
+                if last_iso is not None and (iso[0] != last_iso[0] or iso[1] != last_iso[1]):
+                    write_summary_line()
 
             last_date = ret['date']
             last_iso = iso
