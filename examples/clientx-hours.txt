@@ -1,0 +1,22 @@
+# Example hand-written timesheet.  This will be parsed by ts.py and
+# the clientx-hours-output.txt is the cleaned-up, summed-up result.
+
+# Configuration for this timesheet, in YAML format (akin to Jekyll's "front matter")
+
+summary_template: '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)'
+invoice_template: '==========       {hours_this_week} ({hours_since_invoice} since invoice)'
+----
+
+== Timesheet of work for Client X ==
+
+2015-11-24  11:40a-12:40p, 4p-5:30p, 8p-8:30p # initial plans and research
+2015-11-25  9a-10:45a, 11:30a-2:15p # performed more work
+-----
+
+2015-11-30  .25 # kickoff email
+2015-12-01  10:45a-4:45p # began work on the website
+2015-12-02  8:50a-10a, 12:15p-5:45p, 7:45p-9:30p # built testing fraamework
+2015-12-03  10:09p-10:50p # respond to analysis document
+2015-12-04  .50, 1:30p-2p, 3:20p-5:20p, 9:40-10:30
+=====
+
