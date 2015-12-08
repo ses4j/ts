@@ -1,5 +1,8 @@
 # ts
-Text-based timesheet parser
+
+**A text-based timesheet parser**  
+*...because who has time to open Excel?*
+
 
 This application is intended for use by contractors to track their hours in the
 simplest, most programmer-friendly way possible -- a human-friendly, 
