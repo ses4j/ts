@@ -43,3 +43,10 @@ client: SuperCoolStartup LLC
 ```
 
 Easy!
+
+## TODO
+
+* global settings configuration file
+* pyinstaller http://www.pyinstaller.org/ to build executable
+* pdf/html/txt export?  https://github.com/xhtml2pdf/xhtml2pdf?
+* cloud storage?
