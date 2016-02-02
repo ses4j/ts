@@ -589,6 +589,7 @@ if __name__=='__main__':
                     unit_price=billcode_data['rate'],
                     description=billcode_data['description'])
 
+            invoice_filename_template = settings['invoice_filename_template']
             invoice_filename = invoice_filename_template.format(
                 invoice_code=i['id'], 
                 client_name=settings['client_name']
