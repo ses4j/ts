@@ -12,7 +12,8 @@ from invoice import Invoice
 
 def get_default_settings():
     settings = {
-        'billcode': False,
+        'billcode': True,
+        'billcodes': {},
         'billrate': 1000.,
         'footer': [],
         'prefix': '',
@@ -582,7 +583,8 @@ if __name__=='__main__':
         for i in invoices:
             invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']])
             for item in i['items']:
-                billcode_data = settings['billcodes'][item['billcode']]
+                if settings['billcode']:
+                    billcode_data = settings['billcodes'][item['billcode']]
                 invoice.add_item(
                     name=billcode_data['description'],
                     qty=round(item['hours'], 2),

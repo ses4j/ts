@@ -1,20 +1,30 @@
-# Example output timesheet.
+# Example hand-written timesheet.  This will be parsed by ts.py and
+# the clientx-hours-output.txt is the cleaned-up, summed-up result.
+
 # Configuration for this timesheet, in YAML format (akin to Jekyll's "front matter")
 
-summary_template: '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)'
-invoice_template: '==========       {hours_this_week} ({hours_since_invoice} since invoice)'
+client_name: My Favorite Client
+footer: This goes at the bottom of my invoices.
+billcodes:
+  IMPL:
+    description: Implementation Work
+    rate: 20
+  ARCH:
+    description: Architecture and Design Work
+    rate: 12
 ----
 
-== Timesheet of work for Client X ==
+== Timesheet of work for My Favorite Client ==
 
-2015-11-24      3 11:40a-12:40p(1), 4p-5:30p(1.50), 8p-8:30p(.50) # initial plans and research
-2015-11-25   4.50 9a-10:45a(1.75), 11:30a-2:15p(2.75) # performed more work
-----------   7.50 (7.50 uninvoiced)
+2015-11-24 ARCH     3 11:40a-12:40p(1), 4p-5:30p(1.50), 8p-8:30p(.50) # initial plans and research
+2015-11-25 ARCH  4.50 9a-10:45a(1.75), 11:30a-2:15p(2.75) # performed more work
+----------       7.50 (7.50 uninvoiced)
 
-2015-11-30    .25 # kickoff email
-2015-12-01      6 10:45a-4:45p(6) # began work on the website
-2015-12-02   8.42 8:50a-10a(1.17), 12:15p-5:45p(5.50), 7:45p-9:30p(1.75) # built testing fraamework
-2015-12-03    .68 10:09p-10:50p(.68) # respond to analysis document
-2015-12-04   3.83 .50, 1:30p-2p(.50), 3:20p-5:20p(2), 9:40p-10:30p(.83) 
-==========  19.18 (26.68 since invoice)
+2015-11-30 IMPL   .25 # kickoff email
+2015-12-01 IMPL     6 10:45a-4:45p(6) # began work on the website
+2015-12-02 IMPL  8.42 8:50a-10a(1.17), 12:15p-5:45p(5.50), 7:45p-9:30p(1.75) # built testing fraamework
+2015-12-03 IMPL   .68 10:09p-10:50p(.68) # respond to analysis document
+2015-12-04 IMPL  3.83 .50, 1:30p-2p(.50), 3:20p-5:20p(2), 9:40a-10:30a(.83)
+==========       19.18 (26.68 since invoice) # MYFAVCLI001, This is a great invoice.
+
 
