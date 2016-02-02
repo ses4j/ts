@@ -11,7 +11,7 @@ computer-parseable text file format, one file per contract.
 A typical week's entry might look like this:
 
 ```
-client: SuperCoolStartup LLC
+client_name: SuperCoolStartup LLC
 ----
 2015-11-30  .25 # kickoff email
 2015-12-01  10:45a-4:45p # began work on the website
@@ -31,8 +31,9 @@ Some things to note:
 `ts` will parse and canonicalize this into:
 
 ```
-client: SuperCoolStartup LLC
+client_name: SuperCoolStartup LLC
 ----
+
 2015-11-30    .25 # kickoff email
 2015-12-01      6 10:45a-4:45p(6) # began work on the website
 ----------   6.25 (6.25 uninvoiced) # first week, woo!
@@ -42,11 +43,46 @@ client: SuperCoolStartup LLC
 ==========  19.18 (26.68 since invoice)
 ```
 
+## Global Configuration
+
+User default configuration settings can go in ~/.tsconfig.yml (%USERPROFILE%\.tsconfig.yml on Windows).  
+
+For instance: 
+```
+footer:
+  - 'Please pay via bank transfer or check. All payments should be made in USD.'
+  - 'Bank information for wire/direct deposit: My Bank, ABA/Routing: xxx, Acct#: yyy'
+  - 'Make checks payable to XXX YYY'
+invoice_filename_template: invoice-myname-{invoice_code}.pdf
+
+# Here are some more.  These are the defaults, below, but uncomment if you want to change them.
+# invoice_marker: ====
+# invoice_on: marker
+# invoice_template: ==========       {hours_this_week} ({hours_since_invoice} since
+  invoice)
+# prefix: ''
+# summary_marker: '----'
+# summary_on: marker
+# verbose: 0
+# weekly_summary_template: '----------       {hours_this_week} ({hours_since_invoice}
+  uninvoiced)'
+```
+
+## Generating Invoices
+
+To generate a PDF invoice, include an invoice marker in the file where you want it 
+and then use the `-i/--invoice` option.  It will write one PDF for every `invoice_marker` 
+(`====` by default) it finds, and include the comment in the invoice.  For example:
+```
+====  # MYCLIENT001, This invoice covers everything through Jan 31, 2016.
+```
+
+A file (using the `invoice_filename_template` setting) will be generated.  The template supports `{invoice_code}`, which comes from the ==== comment before the first comma.
+
 Easy!
 
 ## TODO
 
-* global settings configuration file
 * pyinstaller http://www.pyinstaller.org/ to build executable
 * pdf/html/txt export?  https://github.com/xhtml2pdf/xhtml2pdf?
 * cloud storage?

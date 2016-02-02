@@ -15,14 +15,15 @@ def get_default_settings():
         'billcode': False,
         'billrate': 1000.,
         'footer': [],
-        'prefix': '* ',
+        'prefix': '',
         'invoice_on': 'marker',
         'invoice_marker': '====',
         'summary_on': 'marker',
         'summary_marker': '----',
         'verbose': 0,
         'weekly_summary_template': '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)',
-        'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)'
+        'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)',
+        'invoice_filename_template': 'invoice-{invoice_code}.pdf'
     }
     return settings
 
@@ -588,6 +589,10 @@ if __name__=='__main__':
                     unit_price=billcode_data['rate'],
                     description=billcode_data['description'])
 
-            invoice_filename = 'invoice-{}.pdf'.format(i['id'])
+            invoice_filename = invoice_filename_template.format(
+                invoice_code=i['id'], 
+                client_name=settings['client_name']
+            )
+            
             invoice.save(invoice_filename)
             print("Wrote invoice to {}".format(invoice_filename))
