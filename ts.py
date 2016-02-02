@@ -1,13 +1,20 @@
 import logging, re, os, shutil, sys
 from datetime import datetime
+from collections import defaultdict
+from os.path import expanduser
 
 from dateutil.parser import parse as dateutil_parse
 from modgrammar import *
 import yaml
 
+from invoice import Invoice
+
+
 def get_default_settings():
     settings = {
         'billcode': False,
+        'billrate': 1000.,
+        'footer': [],
         'prefix': '* ',
         'invoice_on': 'marker',
         'invoice_marker': '====',
@@ -21,8 +28,8 @@ def get_default_settings():
 
 def samefile(f1, f2):
     '''
-    A simple replacement of the os.path.samefile() function not existing 
-    on the Windows platform. 
+    A simple replacement of the os.path.samefile() function not existing
+    on the Windows platform.
     MAC/Unix supported in standard way :).
 
     Author: Denis Barmenkov <denis.barmenkov@gmail.com>
@@ -30,10 +37,10 @@ def samefile(f1, f2):
     Source: code.activestate.com/recipes/576886/
 
     Copyright: this code is free, but if you want to use it, please
-               keep this multiline comment along with function source. 
+               keep this multiline comment along with function source.
                Thank you.
 
-    2009-08-19 20:13 
+    2009-08-19 20:13
     '''
     try:
         return os.path.samefile(f1, f2)
@@ -52,7 +59,7 @@ grammar_whitespace = False
 
 class MyDate(Grammar):
     # grammar = (WORD('0-9', "-0-9/", grammar_name='date'))
-    grammar = (WORD('2', "-0-9", fullmatch=True, grammar_name='date') 
+    grammar = (WORD('2', "-0-9", fullmatch=True, grammar_name='date')
         | WORD('0-9', "-0-9/", grammar_name='date'))
     grammar_tags = ['date']
 
@@ -67,7 +74,7 @@ class Hour(Grammar):
     grammar = WORD("0-9", min=1, max=2, grammar_name='hour')
 
 class Minute(Grammar):
-    grammar = WORD("0-9", min=1, max=2, grammar_name='minute')    
+    grammar = WORD("0-9", min=1, max=2, grammar_name='minute')
 
 class AMPM(Grammar):
     grammar = L("A") | L("P") | L("a") | L("p")
@@ -89,14 +96,15 @@ class Prefix(Grammar):
 class Suffix(Grammar):
     grammar = (OPTIONAL(SPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
 
+# 
 class MyGrammar (Grammar):
     grammar = (
         G(Prefix, MyDate, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
         G(Prefix, MyDate, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
-        G(Prefix, MyDate, SPACE, Hours, Suffix, grammar_name="2arghours") |  
+        G(Prefix, MyDate, SPACE, Hours, Suffix, grammar_name="2arghours") |
         G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
         G(Prefix, MyDate, SPACE, BillCode, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
-        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, Suffix, grammar_name="2arghours") |  
+        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, Suffix, grammar_name="2arghours") |
         G(Prefix, MyDate, Suffix, grammar_name="justdate")
     )
 
@@ -104,7 +112,7 @@ myparser = MyGrammar.parser()
 
 time_regex = re.compile(r'(\d{1,2})(:\d+)?([aApP])?')
 def parse_time(cur_date, time_str, after=None):
-    """ Parse time 
+    """ Parse time
 
     >>> parse_time(datetime(2015, 6, 3, 0, 0), '12p')
     datetime.datetime(2015, 6, 3, 12, 0)
@@ -135,7 +143,7 @@ def parse_time(cur_date, time_str, after=None):
     minute = 0
     if g[1] is not None:
         minute = int(g[1][1:])
-    
+
     if g[2] is not None:
         if hour != 12 and g[2] in ('p','P'):
             hour += 12
@@ -152,7 +160,7 @@ def parse_time(cur_date, time_str, after=None):
                 logger.warn("Assuming time {} is PM".format(time_str))
                 hour += 12
 
-    
+
     return datetime(cur_date.year, cur_date.month, cur_date.day, hour=hour, minute=minute)
 
 class TimesheetParseError(Exception):
@@ -188,7 +196,7 @@ def parse(line, settings=None, prefix=None):
     >>> format_ret(d)
     '* 2015-07-13  3.75 .25, 1:30p-5p(3.50)'
     """
-    
+
     if settings is None:
         settings = get_default_settings()
 
@@ -210,14 +218,15 @@ def parse(line, settings=None, prefix=None):
     ret['prefix'] = result.get(Prefix)
     ret['suffix'] = result.get(Suffix)
     ret['billcode'] = result.get(BillCode)
+    # ret['comment'] = ret['suffix'].get(Comment)
 
     cur_date = dateutil_parse(str(date_g)).date()
     ret['date'] = cur_date
-    
+
     hours_g = result.get(Hours)
     if hours_g is not None:
         ret['hours'] = float(str(hours_g))
-    
+
     ranges = result.get(RangeList)
     if ranges is not None:
         ret['ranges'] = []
@@ -237,7 +246,7 @@ def parse(line, settings=None, prefix=None):
                     end = str(times[1])
                 else:
                     raise Exception()
-                
+
                 try:
                     parsed_start = parse_time(cur_date, start)
                 except (ValueError, ):
@@ -262,7 +271,7 @@ def parse(line, settings=None, prefix=None):
             else:
                 pass
 
-    
+
     if 'ranges' in ret:
         total_duration = sum([r['duration'] for r in ret['ranges'] if r['duration'] is not None])
         if 'hours' in ret and format_hours(total_duration) != format_hours(ret['hours']):
@@ -289,7 +298,7 @@ def format_hours(h):
     return ("%.2f" % h).lstrip('0')
 
 def format_time(t):
-    """ Print out succinct time. 
+    """ Print out succinct time.
     >>> format_time(datetime(2015, 1, 1, 5, 15, 0))
     '5:15a'
     >>> format_time(datetime(2015, 1, 1, 12, 0, 0))
@@ -356,6 +365,22 @@ def load_front_matter(f):
     """
     settings = get_default_settings()
 
+    def update_from_file(settings, filename):
+        try:
+            default_f = open(filename)
+        except IOError:
+            print "'{}' not found, skipping...".format(filename)
+            return
+
+        if default_f:
+            print "loading from '{}'...".format(filename)
+            default_yml_settings = yaml.load(default_f)
+            settings.update(default_yml_settings)
+            default_f.close()
+
+    update_from_file(settings, expanduser('~/.tsconfig.yml'))
+    update_from_file(settings, 'default.yml')
+
     front_matter = []
     found=False
     for line in f:
@@ -371,7 +396,7 @@ def load_front_matter(f):
     fm_settings = yaml.load("".join(front_matter))
     settings.update(fm_settings)
 
-    return settings
+    return settings, front_matter
 
 
 if __name__=='__main__':
@@ -380,13 +405,14 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Process a timesheet')
     parser.add_argument('-v', '--verbose', action='count', default=None)
     parser.add_argument('-f', '--file', metavar='FILE', required=True)
+    parser.add_argument('-i', '--invoice', action='store_true', help='Write PDF invoice.')
     parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
 
     args = parser.parse_args()
 
     if args.out is None:
         args.out = args.file
-        
+
     input_filename = args.file
     output_filename = args.out
     if samefile(args.file, args.out):
@@ -403,12 +429,13 @@ if __name__=='__main__':
     invoice_has_started = False
     weekly_hours = 0.
     invoice_hours = 0.
+    invoice_hours_per_code = defaultdict(int)
 
     def format_summary_line():
         # global weekly_hours, invoice_hours,
         weekly_summary_template = settings['prefix'] + settings['weekly_summary_template']
         return weekly_summary_template.format(
-            hours_this_week=format_hours(weekly_hours), 
+            hours_this_week=format_hours(weekly_hours),
             hours_since_invoice=format_hours(invoice_hours))
 
     def write_summary_line(invoice=False, original_line=''):
@@ -419,16 +446,29 @@ if __name__=='__main__':
             template = settings['weekly_summary_template']
 
         summary_line = settings['prefix'] + template.format(
-            hours_this_week=format_hours(weekly_hours), 
+            hours_this_week=format_hours(weekly_hours),
             hours_since_invoice=format_hours(invoice_hours))
 
         original_line_split = original_line.split('#', 1)
+        comment = ''
         if len(original_line_split)==2:
             comment = original_line_split[-1].strip()
             summary_line += ' # ' + comment
 
+        invoice_id, invoice_description = '', ''
+        try:
+            invoice_id, invoice_description = comment.split(',', 1)
+        except:
+            pass
+
+        if invoice:
+            invoice_data = {'id': invoice_id, 'hours': invoice_hours, 'items': [], 'description': invoice_description.strip()}
+            for k,v in invoice_hours_per_code.items():
+                invoice_data['items'].append({'billcode': k, 'hours': v})
+            invoices.append(invoice_data)
+
         if weekly_hours != 0. or invoice:
-            if settings['verbose'] >= 1: 
+            if settings['verbose'] >= 1:
                 print summary_line
             if outf:
                 outf.write(summary_line + '\n')
@@ -436,20 +476,28 @@ if __name__=='__main__':
 
             if invoice:
                 invoice_hours = 0.
-        
+                invoice_hours_per_code.clear()
+
         if outf:
             outf.write('\n')
 
 
-    settings = load_front_matter(f)
+
+    settings, raw_front_matter = load_front_matter(f)
     if args.verbose is not None:
         settings['verbose'] = args.verbose
 
-    logger.info("settings {}".format(settings))
+    # logger.info("settings {}".format(settings))
 
     outf = open(output_filename, 'w')
-    yaml.dump(settings, outf, default_flow_style=False)
+
+    for line in raw_front_matter:
+        outf.write(line)
+
+    # yaml.dump(settings, outf, default_flow_style=False)
     outf.write('----\n')
+
+    invoices = []
 
     for line in f:
         if settings['verbose'] >= 1:
@@ -502,11 +550,12 @@ if __name__=='__main__':
             last_iso = iso
             weekly_hours += ret['hours']
             invoice_hours += ret['hours']
+            invoice_hours_per_code[str(ret.get('billcode', ''))] += ret['hours']
 
             summary_results[ret['date']] = ret
 
             fixed_line = format_ret(ret, settings)
-            if settings['verbose'] >= 1: 
+            if settings['verbose'] >= 1:
                 print ">", fixed_line
             if outf:
                 outf.write(fixed_line.rstrip() + '\n')
@@ -527,3 +576,18 @@ if __name__=='__main__':
         outf.close()
 
     print "{} hours uninvoiced currently...".format(format_hours(invoice_hours))
+
+    if args.invoice:
+        for i in invoices:
+            invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']])
+            for item in i['items']:
+                billcode_data = settings['billcodes'][item['billcode']]
+                invoice.add_item(
+                    name=billcode_data['description'],
+                    qty=round(item['hours'], 2),
+                    unit_price=billcode_data['rate'],
+                    description=billcode_data['description'])
+
+            invoice_filename = 'invoice-{}.pdf'.format(i['id'])
+            invoice.save(invoice_filename)
+            print("Wrote invoice to {}".format(invoice_filename))

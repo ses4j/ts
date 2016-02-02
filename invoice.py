@@ -1,5 +1,7 @@
 import datetime
 import logging, re, os, shutil, sys
+import locale
+
 from reportlab.pdfgen import canvas
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import Table
@@ -30,8 +32,10 @@ note = (
     u'Please make all cheques payable to Your Name.',
 )
 
+locale.setlocale( locale.LC_ALL, '' )
+
 def format_currency(value, currency):
-    return str(value)
+    return locale.currency(value, grouping=True) #"{0:C0}".format(value)
 
 def draw_header(canvas):
     """ Draws the invoice header """
@@ -48,7 +52,7 @@ def draw_header(canvas):
 
 def draw_address(canvas):
     """ Draws the business address """
- 
+
     canvas.setFont('Helvetica', 9)
     textobject = canvas.beginText(13 * cm, -2.5 * cm)
     for line in business_details:
@@ -56,7 +60,7 @@ def draw_address(canvas):
     canvas.drawText(textobject)
 
 
-def draw_footer(canvas):
+def draw_footer(canvas, text=None):
     """ Draws the invoice footer """
     note = (
         u'Bank Details: Street address, Town, County, POSTCODE',
@@ -64,8 +68,10 @@ def draw_footer(canvas):
         u'Please pay via bank transfer or cheque. All payments should be made in CURRENCY.',
         u'Make cheques payable to Company Name Ltd.',
     )
+    if text is None:
+        text = note
     textobject = canvas.beginText(1 * cm, -27 * cm)
-    for line in note:
+    for line in text:
         textobject.textLine(line)
     canvas.drawText(textobject)
 
@@ -90,7 +96,7 @@ def draw_pdf(buffer, invoice):
     canvas.restoreState()
 
     canvas.saveState()
-    footer_func(canvas)
+    footer_func(canvas, invoice.footer)
     canvas.restoreState()
 
     canvas.saveState()
@@ -101,7 +107,7 @@ def draw_pdf(buffer, invoice):
     textobject = canvas.beginText(1.5 * cm, -2.5 * cm)
     for line in invoice.client_business_details:
         textobject.textLine(line)
-    
+
     # if invoice.address.contact_name:
     #     textobject.textLine(invoice.address.contact_name)
     # textobject.textLine(invoice.address.address_one)
@@ -119,6 +125,10 @@ def draw_pdf(buffer, invoice):
     textobject.textLine(u'Invoice ID: %s' % invoice.invoice_id)
     textobject.textLine(u'Invoice Date: %s' % invoice.invoice_date.strftime('%d %b %Y'))
     textobject.textLine(u'Client: %s' % invoice.client)
+
+    for line in invoice.body_text:
+        textobject.textLine(line)
+
     canvas.drawText(textobject)
 
     # Items
@@ -142,27 +152,35 @@ def draw_pdf(buffer, invoice):
         ('BACKGROUND', (0, 0), (-1, 0), (0.8, 0.8, 0.8)),
     ])
     tw, th, = table.wrapOn(canvas, 15 * cm, 19 * cm)
-    table.drawOn(canvas, 1 * cm, -8 * cm - th)
+    table.drawOn(canvas, 1 * cm, -10 * cm - th)
 
     canvas.showPage()
     canvas.save()
 
 class Invoice():
-    def __init__(self, id, client_business_details, client_name, 
-        invoice_date=datetime.datetime.now(), 
-        currency='USD'):
+    def __init__(self, id, client_business_details, client_name,
+        invoice_date=datetime.datetime.now(),
+        currency='USD', body=None, footer=None):
         self.invoice_id = id
         self.invoice_date = invoice_date
         self.client = client_name
         self.currency = currency
         self.items = []
         self.client_business_details = client_business_details
+        self.footer = footer
+        self.body_text = body
 
     def total(self):
         return sum([i.total() for i in self.items])
 
-    def add_item(self, item):
-        self.items.append(item)
+    def add_item(self, *args, **kwargs):
+        self.items.append(Item(*args, **kwargs))
+
+    def save(self, out_filepath):
+        if out_filepath.lower().endswith('.pdf'):
+            draw_pdf(out_filepath, self)
+        else:
+            raise NotImplementedError("only .pdf")
 
 
 class Item(object):
@@ -195,6 +213,7 @@ client_business_details = [
     'NYC',
 ]
 
-invoice = Invoice("VES001", client_business_details, "Vestorly")
-invoice.add_item(Item('august hours', 50.25, 125.0, 'Hours for august'))
-draw_pdf('out.pdf', invoice)
+if __name__=='__main__':
+    invoice = Invoice("VES001", client_business_details, "Vestorly")
+    invoice.add_item(Item('august hours', 50.25, 125.0, 'Hours for august'))
+    draw_pdf('out.pdf', invoice)
