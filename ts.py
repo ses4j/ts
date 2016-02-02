@@ -1,21 +1,29 @@
 import logging, re, os, shutil, sys
 from datetime import datetime
+from collections import defaultdict
+from os.path import expanduser
 
 from dateutil.parser import parse as dateutil_parse
 from modgrammar import *
 import yaml
 
+from invoice import Invoice
+
+
 def get_default_settings():
     settings = {
         'billcode': False,
-        'prefix': '* ',
+        'billrate': 1000.,
+        'footer': [],
+        'prefix': '',
         'invoice_on': 'marker',
         'invoice_marker': '====',
         'summary_on': 'marker',
         'summary_marker': '----',
         'verbose': 0,
         'weekly_summary_template': '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)',
-        'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)'
+        'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)',
+        'invoice_filename_template': 'invoice-{invoice_code}.pdf'
     }
     return settings
 
@@ -89,6 +97,7 @@ class Prefix(Grammar):
 class Suffix(Grammar):
     grammar = (OPTIONAL(SPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
 
+# 
 class MyGrammar (Grammar):
     grammar = (
         G(Prefix, MyDate, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
@@ -210,6 +219,7 @@ def parse(line, settings=None, prefix=None):
     ret['prefix'] = result.get(Prefix)
     ret['suffix'] = result.get(Suffix)
     ret['billcode'] = result.get(BillCode)
+    # ret['comment'] = ret['suffix'].get(Comment)
 
     cur_date = dateutil_parse(str(date_g)).date()
     ret['date'] = cur_date
@@ -356,6 +366,22 @@ def load_front_matter(f):
     """
     settings = get_default_settings()
 
+    def update_from_file(settings, filename):
+        try:
+            default_f = open(filename)
+        except IOError:
+            print "'{}' not found, skipping...".format(filename)
+            return
+
+        if default_f:
+            print "loading from '{}'...".format(filename)
+            default_yml_settings = yaml.load(default_f)
+            settings.update(default_yml_settings)
+            default_f.close()
+
+    update_from_file(settings, expanduser('~/.tsconfig.yml'))
+    update_from_file(settings, 'default.yml')
+
     front_matter = []
     found=False
     for line in f:
@@ -371,7 +397,7 @@ def load_front_matter(f):
     fm_settings = yaml.load("".join(front_matter))
     settings.update(fm_settings)
 
-    return settings
+    return settings, front_matter
 
 
 if __name__=='__main__':
@@ -380,6 +406,7 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Process a timesheet')
     parser.add_argument('file', metavar='FILE')
     parser.add_argument('-v', '--verbose', action='count', default=None)
+    parser.add_argument('-i', '--invoice', action='store_true', help='Write PDF invoice.')
     parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
 
     args = parser.parse_args()
@@ -403,6 +430,7 @@ if __name__=='__main__':
     invoice_has_started = False
     weekly_hours = 0.
     invoice_hours = 0.
+    invoice_hours_per_code = defaultdict(int)
 
     def format_summary_line():
         # global weekly_hours, invoice_hours,
@@ -423,9 +451,22 @@ if __name__=='__main__':
             hours_since_invoice=format_hours(invoice_hours))
 
         original_line_split = original_line.split('#', 1)
+        comment = ''
         if len(original_line_split)==2:
             comment = original_line_split[-1].strip()
             summary_line += ' # ' + comment
+
+        invoice_id, invoice_description = '', ''
+        try:
+            invoice_id, invoice_description = comment.split(',', 1)
+        except:
+            pass
+
+        if invoice:
+            invoice_data = {'id': invoice_id, 'hours': invoice_hours, 'items': [], 'description': invoice_description.strip()}
+            for k,v in invoice_hours_per_code.items():
+                invoice_data['items'].append({'billcode': k, 'hours': v})
+            invoices.append(invoice_data)
 
         if weekly_hours != 0. or invoice:
             if settings['verbose'] >= 1:
@@ -436,20 +477,28 @@ if __name__=='__main__':
 
             if invoice:
                 invoice_hours = 0.
+                invoice_hours_per_code.clear()
 
         if outf:
             outf.write('\n')
 
 
-    settings = load_front_matter(f)
+
+    settings, raw_front_matter = load_front_matter(f)
     if args.verbose is not None:
         settings['verbose'] = args.verbose
 
-    logger.info("settings {}".format(settings))
+    # logger.info("settings {}".format(settings))
 
     outf = open(output_filename, 'w')
-    yaml.dump(settings, outf, default_flow_style=False)
+
+    for line in raw_front_matter:
+        outf.write(line)
+
+    # yaml.dump(settings, outf, default_flow_style=False)
     outf.write('----\n')
+
+    invoices = []
 
     for line in f:
         if settings['verbose'] >= 1:
@@ -502,6 +551,7 @@ if __name__=='__main__':
             last_iso = iso
             weekly_hours += ret['hours']
             invoice_hours += ret['hours']
+            invoice_hours_per_code[str(ret.get('billcode', ''))] += ret['hours']
 
             summary_results[ret['date']] = ret
 
@@ -527,3 +577,22 @@ if __name__=='__main__':
         outf.close()
 
     print "{} hours uninvoiced currently...".format(format_hours(invoice_hours))
+
+    if args.invoice:
+        for i in invoices:
+            invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']])
+            for item in i['items']:
+                billcode_data = settings['billcodes'][item['billcode']]
+                invoice.add_item(
+                    name=billcode_data['description'],
+                    qty=round(item['hours'], 2),
+                    unit_price=billcode_data['rate'],
+                    description=billcode_data['description'])
+
+            invoice_filename = invoice_filename_template.format(
+                invoice_code=i['id'], 
+                client_name=settings['client_name']
+            )
+            
+            invoice.save(invoice_filename)
+            print("Wrote invoice to {}".format(invoice_filename))
