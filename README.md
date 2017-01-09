@@ -58,14 +58,12 @@ invoice_filename_template: invoice-myname-{invoice_code}.pdf
 # Here are some more.  These are the defaults, below, but uncomment if you want to change them.
 # invoice_marker: ====
 # invoice_on: marker
-# invoice_template: ==========       {hours_this_week} ({hours_since_invoice} since
-  invoice)
+# invoice_template: ==========       {hours_this_week} ({hours_since_invoice} since invoice)
 # prefix: ''
 # summary_marker: '----'
 # summary_on: marker
 # verbose: 0
-# weekly_summary_template: '----------       {hours_this_week} ({hours_since_invoice}
-  uninvoiced)'
+# weekly_summary_template: '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)'
 ```
 
 ## Generating Invoices
