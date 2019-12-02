@@ -49,6 +49,12 @@ User default configuration settings can go in ~/.tsconfig.yml (%USERPROFILE%\.ts
 
 For instance: 
 ```
+address:
+  - 'Scott Stafford'
+  - '1212 Mockingbird Lane'
+  - 'Washington, DC  20016'
+  - ''
+  - 'Email: scott.stafford@example.com'
 footer:
   - 'Please pay via bank transfer or check. All payments should be made in USD.'
   - 'Bank information for wire/direct deposit: My Bank, ABA/Routing: xxx, Acct#: yyy'

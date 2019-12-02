@@ -50,12 +50,16 @@ def draw_header(canvas):
     canvas.line(0, -1.25 * cm, 21.7 * cm, -1.25 * cm)
 
 
-def draw_address(canvas):
+def draw_address(canvas, text=None):
     """ Draws the business address """
 
     canvas.setFont('Helvetica', 9)
     textobject = canvas.beginText(13 * cm, -2.5 * cm)
-    for line in business_details:
+
+    if text is None:
+        text = business_details
+
+    for line in text:
         textobject.textLine(line)
     canvas.drawText(textobject)
 
@@ -100,7 +104,7 @@ def draw_pdf(buffer, invoice):
     canvas.restoreState()
 
     canvas.saveState()
-    address_func(canvas)
+    address_func(canvas, invoice.address)
     canvas.restoreState()
 
     # Client address
@@ -160,7 +164,7 @@ def draw_pdf(buffer, invoice):
 class Invoice():
     def __init__(self, id, client_business_details, client_name,
         invoice_date=datetime.datetime.now(),
-        currency='USD', body=None, footer=None):
+        currency='USD', body=None, footer=None, address=None):
         self.invoice_id = id
         self.invoice_date = invoice_date
         self.client = client_name
@@ -169,6 +173,7 @@ class Invoice():
         self.client_business_details = client_business_details
         self.footer = footer
         self.body_text = body
+        self.address = address
 
     def total(self):
         return sum([i.total() for i in self.items])
@@ -197,23 +202,13 @@ class Country():
     def __init__(self, name):
         self.name = name
 
-# class Address():
-#     def __init__(self, name, address_one=None, address_two=None):
-#         self.contact_name = name
-#         self.address_one = address_one
-#         self.address_two = address_two
-#         self.town = name
-#         self.county = name
-#         self.postcode = name
-#         self.country = Country(name)
 
-# address = Address('Vestorly', "NYC")
 client_business_details = [
-    'Vestorly',
+    'Company One',
     'NYC',
 ]
 
 if __name__=='__main__':
-    invoice = Invoice("VES001", client_business_details, "Vestorly")
+    invoice = Invoice("VES001", client_business_details, "Company")
     invoice.add_item(Item('august hours', 50.25, 125.0, 'Hours for august'))
     draw_pdf('out.pdf', invoice)
