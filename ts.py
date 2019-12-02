@@ -24,7 +24,8 @@ def get_default_settings():
         'verbose': 0,
         'weekly_summary_template': '----------       {hours_this_week} ({hours_since_invoice} uninvoiced)',
         'invoice_template': '==========       {hours_this_week} ({hours_since_invoice} since invoice)',
-        'invoice_filename_template': 'invoice-{invoice_code}.pdf'
+        'invoice_filename_template': 'invoice-{invoice_code}.pdf',
+        'address': []
     }
     return settings
 
@@ -57,7 +58,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 
-grammar_whitespace = False
+grammar_whitespace_mode = 'explicit'
 
 class MyDate(Grammar):
     # grammar = (WORD('0-9', "-0-9/", grammar_name='date'))
@@ -86,26 +87,26 @@ class MyTime(Grammar):
     # grammar = (WORD("0-9:", grammar_name='time'), OPTIONAL(L("A") | L("P") | L("a") | L("p"), grammar_name='ampm'))
 
 class Range(Grammar):
-    grammar = G(MyTime, OPTIONAL(SPACE), '-', OPTIONAL(SPACE),
+    grammar = G(MyTime, OPTIONAL(WHITESPACE), '-', OPTIONAL(WHITESPACE),
         OPTIONAL(MyTime), OPTIONAL('(', Hours, ')'), grammar_name='range')
 
 class RangeList(Grammar):
-    grammar = LIST_OF(G(Range | Hours), sep=G(",", OPTIONAL(SPACE)), grammar_name="ranges")
+    grammar = LIST_OF(G(Range | Hours), sep=G(",", OPTIONAL(WHITESPACE)), grammar_name="ranges")
 
 class Prefix(Grammar):
-    grammar = (ZERO_OR_MORE(L('*') | SPACE), )
+    grammar = (ZERO_OR_MORE(L('*') | WHITESPACE), )
 
 class Suffix(Grammar):
-    grammar = (OPTIONAL(SPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
+    grammar = (OPTIONAL(WHITESPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
 
 class MyGrammar (Grammar):
     grammar = (
-        G(Prefix, MyDate, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
-        G(Prefix, MyDate, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
-        G(Prefix, MyDate, SPACE, Hours, Suffix, grammar_name="2arghours") |
-        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
-        G(Prefix, MyDate, SPACE, BillCode, SPACE, RangeList,  Suffix, grammar_name="2argrange") |
-        G(Prefix, MyDate, SPACE, BillCode, SPACE, Hours, Suffix, grammar_name="2arghours") |
+        G(Prefix, MyDate, WHITESPACE, Hours, WHITESPACE, RangeList, Suffix, grammar_name="3args") |
+        G(Prefix, MyDate, WHITESPACE, RangeList,  Suffix, grammar_name="2argrange") |
+        G(Prefix, MyDate, WHITESPACE, Hours, Suffix, grammar_name="2arghours") |
+        G(Prefix, MyDate, WHITESPACE, BillCode, WHITESPACE, Hours, WHITESPACE, RangeList, Suffix, grammar_name="3args") |
+        G(Prefix, MyDate, WHITESPACE, BillCode, WHITESPACE, RangeList,  Suffix, grammar_name="2argrange") |
+        G(Prefix, MyDate, WHITESPACE, BillCode, WHITESPACE, Hours, Suffix, grammar_name="2arghours") |
         G(Prefix, MyDate, Suffix, grammar_name="justdate")
     )
 
@@ -169,7 +170,7 @@ class TimesheetParseError(Exception):
 
 def parse(line, settings=None, prefix=None):
     """ Parse grammar.
-    >>> myparser.parse_string("5/20/2015", reset=True, eof=True)
+    >>> myparser.parse_text("5/20/2015", reset=True, eof=True)
     MyGrammar<'5/20/2015'>
     >>> parse("5/20/2015", prefix='')
     {'date': datetime.date(2015, 5, 20), 'prefix': Prefix<''>, 'suffix': Suffix<None, None, ''>}
@@ -208,7 +209,7 @@ def parse(line, settings=None, prefix=None):
         return None
 
     line = line.rstrip()
-    origresult = myparser.parse_string(line, reset=True, eof=True) #, matchtype='longest')
+    origresult = myparser.parse_text(line, reset=True, eof=True) #, matchtype='longest')
     ret = {}
     result = origresult.elements[0]
 
@@ -375,7 +376,7 @@ def load_front_matter(f):
 
         if default_f:
             print("loading from '{}'...".format(filename))
-            default_yml_settings = yaml.load(default_f)
+            default_yml_settings = yaml.safe_load(default_f)
             settings.update(default_yml_settings)
             default_f.close()
 
@@ -394,7 +395,7 @@ def load_front_matter(f):
         print("Front-matter YAML is required.")
         sys.exit(1)
 
-    fm_settings = yaml.load("".join(front_matter))
+    fm_settings = yaml.safe_load("".join(front_matter))
     settings.update(fm_settings)
 
     return settings, front_matter
@@ -580,7 +581,7 @@ if __name__=='__main__':
 
     if args.invoice:
         for i in invoices:
-            invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']])
+            invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']], address=settings['address'])
             for item in i['items']:
                 if settings['billcode']:
                     billcode_data = settings['billcodes'][item['billcode']]
