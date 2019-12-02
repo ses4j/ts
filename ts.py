@@ -98,7 +98,6 @@ class Prefix(Grammar):
 class Suffix(Grammar):
     grammar = (OPTIONAL(SPACE), OPTIONAL(L('#'), REST_OF_LINE), EOF)
 
-# 
 class MyGrammar (Grammar):
     grammar = (
         G(Prefix, MyDate, SPACE, Hours, SPACE, RangeList, Suffix, grammar_name="3args") |
@@ -159,7 +158,7 @@ def parse_time(cur_date, time_str, after=None):
                 hour += 12
         else:
             if hour < 7:
-                logger.warn("Assuming time {} is PM".format(time_str))
+                logger.warning("Assuming time {} is PM".format(time_str))
                 hour += 12
 
 
@@ -277,14 +276,14 @@ def parse(line, settings=None, prefix=None):
     if 'ranges' in ret:
         total_duration = sum([r['duration'] for r in ret['ranges'] if r['duration'] is not None])
         if 'hours' in ret and format_hours(total_duration) != format_hours(ret['hours']):
-            logger.warn('Changing total hours from %s to %s\n  Original: %s' % (ret['hours'], total_duration, line))
+            logger.warning('Changing total hours from %s to %s\n  Original: %s' % (ret['hours'], total_duration, line))
         ret['hours'] = total_duration
 
         if len(ret['ranges']) == 1 and 's' not in ret['ranges'][0]:
             del ret['ranges']
 
     if 'hours' in ret and ret['hours'] > 9:
-        logger.warn('Calculated duration={}, which is above normal\n  Original: {}'.format(ret['hours'], line))
+        logger.warning('Calculated duration={}, which is above normal\n  Original: {}'.format(ret['hours'], line))
 
     if settings['verbose'] >= 2:
         print('= parsed={}'.format(ret))
@@ -371,11 +370,11 @@ def load_front_matter(f):
         try:
             default_f = open(filename)
         except IOError:
-            print "'{}' not found, skipping...".format(filename)
+            print("'{}' not found, skipping...".format(filename))
             return
 
         if default_f:
-            print "loading from '{}'...".format(filename)
+            print("loading from '{}'...".format(filename))
             default_yml_settings = yaml.load(default_f)
             settings.update(default_yml_settings)
             default_f.close()
@@ -392,7 +391,7 @@ def load_front_matter(f):
         front_matter.append(line)
 
     if not found:
-        print "Front-matter YAML is required."
+        print("Front-matter YAML is required.")
         sys.exit(1)
 
     fm_settings = yaml.load("".join(front_matter))
@@ -471,7 +470,7 @@ if __name__=='__main__':
 
         if weekly_hours != 0. or invoice:
             if settings['verbose'] >= 1:
-                print summary_line
+                print(summary_line)
             if outf:
                 outf.write(summary_line + '\n')
             weekly_hours = 0.
@@ -503,7 +502,7 @@ if __name__=='__main__':
 
     for line in f:
         if settings['verbose'] >= 1:
-            print '< {}'.format(line.rstrip())
+            print('< {}'.format(line.rstrip()))
 
         try:
             if invoice_has_started:
@@ -511,7 +510,7 @@ if __name__=='__main__':
                 if settings['invoice_on'] == 'marker' and line.startswith(settings['invoice_marker']):
                     write_summary_line(invoice=True, original_line=line)
                     if settings['verbose'] >= 1:
-                        print "> Wrote summary line".format()
+                        print("> Wrote summary line".format())
                     continue
 
                 # Throw out empty lines
@@ -530,18 +529,18 @@ if __name__=='__main__':
             ret = parse(line, settings)
             if ret is None:
                 if settings['verbose'] >= 1 and line.strip() != '':
-                    print "> Failed to parse. Writing straight.".format()
+                    print("> Failed to parse. Writing straight.".format())
                 if outf:
                     outf.write(line.rstrip() + '\n')
                 continue
 
             if not invoice_has_started and settings['verbose'] >= 1:
-                print "! Invoice has started!"
+                print("! Invoice has started!")
             invoice_has_started = True
             if last_date is not None and last_date > ret['date']:
-                logger.warn('Date {} is listed after date {}.'.format(ret['date'], last_date))
+                logger.warning('Date {} is listed after date {}.'.format(ret['date'], last_date))
             if ret['date'] in summary_results:
-                logger.warn('Date {} listed multiple times.'.format(ret['date']))
+                logger.warning('Date {} listed multiple times.'.format(ret['date']))
 
             iso = ret['date'].isocalendar()
             if settings['summary_on'] == 'weekly':
@@ -558,12 +557,12 @@ if __name__=='__main__':
 
             fixed_line = format_ret(ret, settings)
             if settings['verbose'] >= 1:
-                print ">", fixed_line
+                print(">", fixed_line)
             if outf:
                 outf.write(fixed_line.rstrip() + '\n')
 
         except TimesheetParseError:
-            print "Problem parsing."
+            print("Problem parsing.")
             raise
         except ParseError:
             if outf:
@@ -577,7 +576,7 @@ if __name__=='__main__':
     if outf:
         outf.close()
 
-    print "{} hours uninvoiced currently...".format(format_hours(invoice_hours))
+    print("{} hours uninvoiced currently...".format(format_hours(invoice_hours)))
 
     if args.invoice:
         for i in invoices:
@@ -585,6 +584,9 @@ if __name__=='__main__':
             for item in i['items']:
                 if settings['billcode']:
                     billcode_data = settings['billcodes'][item['billcode']]
+                else:
+                    billcode_data = settings['billcodes']['default']
+                    
                 invoice.add_item(
                     name=billcode_data['description'],
                     qty=round(item['hours'], 2),
@@ -593,9 +595,9 @@ if __name__=='__main__':
 
             invoice_filename_template = settings['invoice_filename_template']
             invoice_filename = invoice_filename_template.format(
-                invoice_code=i['id'], 
+                invoice_code=i['id'],
                 client_name=settings['client_name']
             )
-            
+
             invoice.save(invoice_filename)
             print("Wrote invoice to {}".format(invoice_filename))
