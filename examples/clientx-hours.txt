@@ -5,6 +5,11 @@
 
 client_name: My Favorite Client
 invoice_filename_template: invoice-myname-{invoice_code}.pdf
+address:
+  - Your Name
+  - Address Line 1
+  - Address Line 2
+  - Email Address Here
 footer:
   - This goes at the bottom of my invoices.
   - So does this.
