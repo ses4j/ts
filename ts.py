@@ -1,7 +1,9 @@
 import logging, re, os, shutil, sys
-from datetime import datetime
+from datetime import date, datetime
+from dataclasses import dataclass
 from collections import defaultdict
 from os.path import expanduser
+from typing import List, Optional
 
 from dateutil.parser import parse as dateutil_parse
 from modgrammar import *
@@ -52,7 +54,18 @@ def samefile(f1, f2):
         f2 = os.path.abspath(f2).lower()
         return f1 == f2
 
+@dataclass
+class TimesheetLineItem:
+    date: date
+    prefix: Optional[str] = None
+    suffix: Optional[str] = None
+    billcode: Optional[str] = None
+    hours: Optional[int] = None
+    ranges: Optional[List[int]] = None
 
+# @dataclass
+# class TimesheetSummary:
+#     hours:
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -168,35 +181,35 @@ def parse_time(cur_date, time_str, after=None):
 class TimesheetParseError(Exception):
     pass
 
-def parse(line, settings=None, prefix=None):
+def parse(line, settings=None, prefix=None) -> Optional[TimesheetLineItem]:
     """ Parse grammar.
     >>> myparser.parse_text("5/20/2015", reset=True, eof=True)
     MyGrammar<'5/20/2015'>
     >>> parse("5/20/2015", prefix='')
-    {'date': datetime.date(2015, 5, 20), 'prefix': Prefix<''>, 'suffix': Suffix<None, None, ''>}
+    TimesheetLineItem(date=datetime.date(2015, 5, 20), prefix=Prefix<''>, suffix=Suffix<None, None, ''>, billcode=None, hours=None, ranges=None)
     >>> d = parse("6/21/2015 1.25  3:33-4:44a", prefix='')
     Traceback (most recent call last):
         ...
-    TimesheetParseError: huh?
+    ts.TimesheetParseError: 2015-06-21 04:44:00 < 2015-06-21 15:33:00 in 6/21/2015 1.25  3:33-4:44a
     >>> d = parse("5/20/2015 5  10:10 - 10:25a, 12-", prefix='')
-    >>> d['date']
+    >>> d.date
     datetime.date(2015, 5, 20)
-    >>> d['hours']
+    >>> d.hours
     0.25
-    >>> len(d['ranges'])
+    >>> len(d.ranges)
     2
-    >>> d['ranges'][0]['s']
+    >>> d.ranges[0]['s']
     datetime.datetime(2015, 5, 20, 10, 10)
     >>> format_ret(d)
-    '2015-05-20   .25 10:10a-10:25a(.25), 12p-'
+    '2015-05-20        .25 10:10a-10:25a(.25), 12p-'
     >>> d = parse('6/15/2015 4.25  10a-11:30(1.5), 3-5:45p(2.75)', prefix='')
-    >>> d['ranges'][1]['duration']
+    >>> d.ranges[1]['duration']
     2.75
     >>> d = parse('* 2015-06-03  1.5  10a-11:15a, 12:45p-1p, 6-6:15 # whatever yo', prefix='* ')
     >>> d = parse('* 7/22/2015 6.25  10:00a-11:30a(1.5), 12:30p-3:30p(3), 9:15p-11p(1.75)', prefix='* ')
     >>> d = parse('* 7/13/2015 3.5  .25, 1:30p-5p', prefix='* ')
     >>> format_ret(d)
-    '* 2015-07-13  3.75 .25, 1:30p-5p(3.50)'
+    '* 2015-07-13       3.75 .25, 1:30p-5p(3.50)'
     """
 
     if settings is None:
@@ -210,34 +223,31 @@ def parse(line, settings=None, prefix=None):
 
     line = line.rstrip()
     origresult = myparser.parse_text(line, reset=True, eof=True) #, matchtype='longest')
-    ret = {}
     result = origresult.elements[0]
 
     date_g = result.get(MyDate)
     if date_g is None:
         return None
 
-    ret['prefix'] = result.get(Prefix)
-    ret['suffix'] = result.get(Suffix)
-    ret['billcode'] = result.get(BillCode)
-    # ret['comment'] = ret['suffix'].get(Comment)
-
     cur_date = dateutil_parse(str(date_g)).date()
-    ret['date'] = cur_date
+    ret = TimesheetLineItem(date=cur_date)
+    ret.prefix = result.get(Prefix)
+    ret.suffix = result.get(Suffix)
+    ret.billcode = result.get(BillCode)
 
     hours_g = result.get(Hours)
     if hours_g is not None:
-        ret['hours'] = float(str(hours_g))
+        ret.hours = float(str(hours_g))
 
     ranges = result.get(RangeList)
     if ranges is not None:
-        ret['ranges'] = []
+        ret.ranges = []
         # logger.debug(ranges.elements)
 
         for r in ranges.elements[0].elements:
             if r.grammar_name == 'Hours':
                 duration = float(str(r))
-                ret['ranges'].append( {'duration': duration} )
+                ret.ranges.append( {'duration': duration} )
             elif r.grammar_name == 'Range':
                 times = r.find_all(MyTime)
                 if len(times)==1:
@@ -269,22 +279,22 @@ def parse(line, settings=None, prefix=None):
                     duration = (parsed_end-parsed_start).seconds/60./60.
                 else:
                     duration = None
-                ret['ranges'].append( {'s': parsed_start, 'e': parsed_end, 'duration': duration} )
+                ret.ranges.append( {'s': parsed_start, 'e': parsed_end, 'duration': duration} )
             else:
                 pass
 
 
-    if 'ranges' in ret:
-        total_duration = sum([r['duration'] for r in ret['ranges'] if r['duration'] is not None])
-        if 'hours' in ret and format_hours(total_duration) != format_hours(ret['hours']):
-            logger.warning('Changing total hours from %s to %s\n  Original: %s' % (ret['hours'], total_duration, line))
-        ret['hours'] = total_duration
+    if ret.ranges is not None:
+        total_duration = sum([r['duration'] for r in ret.ranges if r['duration'] is not None])
+        if ret.hours is not None and format_hours(total_duration) != format_hours(ret.hours):
+            logger.warning('Changing total hours from %s to %s\n  Original: %s' % (ret.hours, total_duration, line))
+        ret.hours = total_duration
 
-        if len(ret['ranges']) == 1 and 's' not in ret['ranges'][0]:
-            del ret['ranges']
+        if len(ret.ranges) == 1 and 's' not in ret.ranges[0]:
+            del ret.ranges
 
-    if 'hours' in ret and ret['hours'] > 9:
-        logger.warning('Calculated duration={}, which is above normal\n  Original: {}'.format(ret['hours'], line))
+    if ret.hours is not None and ret.hours > 9:
+        logger.warning('Calculated duration={}, which is above normal\n  Original: {}'.format(ret.hours, line))
 
     if settings['verbose'] >= 2:
         print('= parsed={}'.format(ret))
@@ -338,32 +348,31 @@ def format_range(r,):
         else:
             return "%s-" % (format_time(r['s']), )
 
-def format_ret(ret, settings):
+def format_ret(ret, settings=None):
+    if settings is None:
+        settings = get_default_settings()
+
     formatted_billcode = ''
     if settings['billcode']:
-        formatted_billcode = '%5s'% (ret.get('billcode', '') or '', )
+        formatted_billcode = '%5s'% (ret.billcode or '', )
 
-    if 'ranges' not in ret:
-        total_duration = ret['hours']
-        output = '%10s%s %5s' % (ret['date'], formatted_billcode, format_hours(total_duration))
+    if ret.ranges is None:
+        total_duration = ret.hours
+        output = '%10s%s %5s' % (ret.date, formatted_billcode, format_hours(total_duration))
     else:
-        parsed_ranges = ret['ranges']
+        parsed_ranges = ret.ranges
         rearranges = [format_range(r) for r in parsed_ranges]
-        output = '%10s%s %5s %s' % (ret['date'], formatted_billcode, format_hours(ret['hours']), ", ".join(rearranges))
+        output = '%10s%s %5s %s' % (ret.date, formatted_billcode, format_hours(ret.hours), ", ".join(rearranges))
 
-    suffix = str(ret['suffix']).strip()
+    suffix = str(ret.suffix).strip()
     if len(suffix) > 0:
         suffix = " " + suffix
-    return '%s%s%s' % (ret['prefix'], output, suffix)
+    return '%s%s%s' % (ret.prefix, output, suffix)
 
 
 FRONT_MATTER_TERMINUS_REGEX = re.compile('^---+$')
 def load_front_matter(f):
     """ Load jekyll-style front-matter config from top of file.
-
-    >>> re.match
-    datetime.datetime(2015, 6, 3, 12, 0)
-
     """
     settings = get_default_settings()
 
@@ -401,28 +410,8 @@ def load_front_matter(f):
     return settings, front_matter
 
 
-if __name__=='__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Process a timesheet')
-    parser.add_argument('file', metavar='FILE')
-    parser.add_argument('-v', '--verbose', action='count', default=None)
-    parser.add_argument('-i', '--invoice', action='store_true', help='Write PDF invoice.')
-    parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
-
-    args = parser.parse_args()
-
-    if args.out is None:
-        args.out = args.file
-
-    input_filename = args.file
-    output_filename = args.out
-    if samefile(args.file, args.out):
-        backup_filename = args.file + '.backup'
-        shutil.copyfile(args.file, backup_filename)
-        input_filename = backup_filename
-
-    f = open(input_filename)
+def process_timesheet(f, outf, verbose=0, invoice=False):
+    global weekly_hours, invoice_hours
 
     summary_results = {}
     last_date = None
@@ -483,6 +472,12 @@ if __name__=='__main__':
         if outf:
             outf.write('\n')
 
+    def write_final_summary_line():
+
+        if outf:
+            outf.write('\n')
+        if outf:
+            outf.write('\n')
 
 
     settings, raw_front_matter = load_front_matter(f)
@@ -490,8 +485,6 @@ if __name__=='__main__':
         settings['verbose'] = args.verbose
 
     # logger.info("settings {}".format(settings))
-
-    outf = open(output_filename, 'w')
 
     for line in raw_front_matter:
         outf.write(line)
@@ -538,23 +531,23 @@ if __name__=='__main__':
             if not invoice_has_started and settings['verbose'] >= 1:
                 print("! Invoice has started!")
             invoice_has_started = True
-            if last_date is not None and last_date > ret['date']:
-                logger.warning('Date {} is listed after date {}.'.format(ret['date'], last_date))
-            if ret['date'] in summary_results:
-                logger.warning('Date {} listed multiple times.'.format(ret['date']))
+            if last_date is not None and last_date > ret.date:
+                logger.warning('Date {} is listed after date {}.'.format(ret.date, last_date))
+            if ret.date in summary_results:
+                logger.warning('Date {} listed multiple times.'.format(ret.date))
 
-            iso = ret['date'].isocalendar()
+            iso = ret.date.isocalendar()
             if settings['summary_on'] == 'weekly':
                 if last_iso is not None and (iso[0] != last_iso[0] or iso[1] != last_iso[1]):
                     write_summary_line()
 
-            last_date = ret['date']
+            last_date = ret.date
             last_iso = iso
-            weekly_hours += ret['hours']
-            invoice_hours += ret['hours']
-            invoice_hours_per_code[str(ret.get('billcode', ''))] += ret['hours']
+            weekly_hours += ret.hours
+            invoice_hours += ret.hours
+            invoice_hours_per_code[str(ret.billcode or '')] += ret.hours
 
-            summary_results[ret['date']] = ret
+            summary_results[ret.date] = ret
 
             fixed_line = format_ret(ret, settings)
             if settings['verbose'] >= 1:
@@ -584,13 +577,13 @@ if __name__=='__main__':
             invoice = Invoice(i['id'], [], settings['client_name'], footer=settings['footer'], body=[i['description']], address=settings['address'])
             for item in i['items']:
                 if settings['billcode']:
-                    billcode_data = settings['billcodes'][item['billcode']]
+                    billcode_data = settings['billcodes'][item.billcode]
                 else:
                     billcode_data = settings['billcodes']['default']
                     
                 invoice.add_item(
                     name=billcode_data['description'],
-                    qty=round(item['hours'], 2),
+                    qty=round(item.hours, 2),
                     unit_price=billcode_data['rate'],
                     description=billcode_data['description'])
 
@@ -602,3 +595,53 @@ if __name__=='__main__':
 
             invoice.save(invoice_filename)
             print("Wrote invoice to {}".format(invoice_filename))
+
+
+if __name__=='__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Process a timesheet')
+    parser.add_argument('file', metavar='FILE')
+    parser.add_argument('-v', '--verbose', action='count', default=None)
+    parser.add_argument('-i', '--invoice', action='store_true', help='Write PDF invoice.')
+    parser.add_argument('-o', '--out', default=None, help="Defaults to overwrite -f FILE.")
+
+    args = parser.parse_args()
+
+    if args.out is None:
+        args.out = args.file
+
+    input_filename = args.file
+    output_filename = args.out
+    is_inplace = samefile(input_filename, output_filename)
+
+    backup_input_filename = input_filename + '.backup'
+    shutil.copyfile(input_filename, backup_input_filename)
+
+    if not is_inplace:
+        backup_output_filename = output_filename + '.backup'
+        shutil.copyfile(output_filename, backup_output_filename)
+
+    copy_to_on_completion = None
+
+    if is_inplace:
+        real_output_filename = output_filename
+        output_filename = output_filename + '.temp_outfile'
+
+    with open(input_filename) as f, open(output_filename, 'w') as outf:
+        try:
+            process_timesheet(f=f, outf=outf, verbose=args.verbose, invoice=args.invoice)
+            success = True
+        except Exception as exc:
+            logger.exception("Crash while processing timesheet.")
+            success = False
+
+    if success:
+        if is_inplace:
+            shutil.copyfile(output_filename, real_output_filename)
+            os.unlink(output_filename)
+        print("Success!")
+    else:
+        print("Crash while processing timesheet.  The input failed to process (but is unharmed).")
+
+
